@@ -404,7 +404,7 @@ function generate() {
 '    "tee":           "' + tee + '",       # Only book slots starting from this tee\n' +
 '    "earliest_time": "' + earliest + '",\n' +
 '    "latest_time":   "' + latest + '",\n' +
-'    "headless":      False,              # Change to True to run silently\n' +
+'    "headless":      True,               # Must be True on GitHub Actions (no display)\n' +
 '    "login_url":     "https://www.thelakesgolfclub.com.au/security/login.msp",\n' +
 '    "booking_url":   "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",\n' +
 '}\n\n' +
