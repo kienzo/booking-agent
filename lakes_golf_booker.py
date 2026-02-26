@@ -1,444 +1,215 @@
 """
-The Lakes Golf Club - Automated Tee Time Booker (MiClub React/API Version)
-===========================================================================
-The booking page uses a React frontend backed by a REST API authenticated
-with a JWT token stored in localStorage after login. This script:
-  1. Logs in via Playwright to obtain the JWT token
-  2. Calls the MiClub API directly to find and book tee times
-  3. Falls back to UI interaction if API endpoints change
-
-SETUP:
-  pip install playwright python-dotenv requests
-  playwright install chromium
-
-CREDENTIALS:
-  Create a .env file in the same folder:
-    GOLF_USERNAME=35          (member number, no leading zeros)
-    GOLF_PASSWORD=yourpassword
-
-SCHEDULING (Mac - crontab):
-  crontab -e
-  Add: 0 11 * * 4 /usr/bin/python3 /path/to/lakes_golf_booker.py >> /path/to/booker.log 2>&1
-  (Runs every Thursday at 11:00am)
-  Find your python path with: which python3
+The Lakes Golf Club - Automated Tee Time Booker
+Generated: 26/02/2026 | OS: Windows | Mode: Book Group
+================================================
+Run: python lakes_golf_booker.py
+# Schedule: schtasks /create /tn "Lakes Golf Booker" /tr "python C:\golf-booker\lakes_golf_booker.py" /sc weekly /d THU /st 11:30 /f
 """
 
-import os
-import sys
-import re
-import json
-import logging
-import requests
-from datetime import datetime, timedelta
+import os, sys, re, logging
+from datetime import datetime
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright
 
-# ─────────────────────────────────────────────
-#  USER CONFIGURATION — edit these values
-# ─────────────────────────────────────────────
 load_dotenv()
 
 CONFIG = {
-    # Credentials (from .env file)
-    "username": os.getenv("GOLF_USERNAME", ""),
-    "password": os.getenv("GOLF_PASSWORD", ""),
-
-    # Playing preferences
-    "num_players":    4,              # Players in your group (2, 3, or 4)
-    "preferred_day":  "Saturday",     # Day of week you want to play
-    "days_ahead":     7,              # How many days ahead to book
-
-    # Tee time window (24hr format) — mid-morning
-    "earliest_time":  "08:00",
-    "latest_time":    "10:00",
-
-    # Show browser window during run (set True for testing, False for silent running)
-    "headless":       True,
-
-    # Club-specific URLs
-    "login_url":      "https://www.thelakesgolfclub.com.au/security/login.msp",
-    "booking_url":    "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",
-    "api_base":       "https://thelakesgolfclub.com.au",
-    "booking_resource_id": "3000000",
+    "username":      os.getenv("GOLF_USERNAME"),  # Set GOLF_USERNAME in GitHub Secrets
+    "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets
+    "booking_date":  "2026-03-15",   # Sunday 15 March 2026
+    "book_mode":     "group",  # Clicks "BOOK GROUP" — books the whole tee time
+    "tee":           "1ST TEE",       # Only book slots starting from this tee
+    "earliest_time": "08:00",
+    "latest_time":   "10:00",
+    "headless":      False,              # Change to True to run silently
+    "login_url":     "https://www.thelakesgolfclub.com.au/security/login.msp",
+    "booking_url":   "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",
 }
 
-# ─────────────────────────────────────────────
-#  LOGGING
-# ─────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 log = logging.getLogger("golf_booker")
 
-
-# ─────────────────────────────────────────────
-#  HELPERS
-# ─────────────────────────────────────────────
-def get_target_date() -> datetime:
-    """Calculate the next occurrence of the preferred playing day."""
-    today = datetime.today()
-    target = today + timedelta(days=CONFIG["days_ahead"])
-    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    desired_wd = day_names.index(CONFIG["preferred_day"])
-    delta = (desired_wd - target.weekday()) % 7
-    return target + timedelta(days=delta)
-
-
-def time_in_window(time_str: str) -> bool:
-    """Return True if a time string (HH:MM or H:MM) is within the preferred window."""
+def time_in_window(t_str):
     try:
-        # Handle both "8:00" and "08:00" formats
-        t  = datetime.strptime(time_str.strip().zfill(5), "%H:%M").time()
+        t  = datetime.strptime(t_str.strip().zfill(5), "%H:%M").time()
         lo = datetime.strptime(CONFIG["earliest_time"], "%H:%M").time()
         hi = datetime.strptime(CONFIG["latest_time"],   "%H:%M").time()
         return lo <= t <= hi
     except ValueError:
         return False
 
-
-def extract_jwt_from_page(page):
-    """Extract the JWT token that MiClub stores in localStorage after login."""
-    try:
-        token = page.evaluate("() => localStorage.getItem('token')")
-        if token:
-            log.info("JWT token extracted from localStorage.")
-            return token
-    except Exception as e:
-        log.warning(f"Could not extract JWT from localStorage: {e}")
-    return None
-
-
-# ─────────────────────────────────────────────
-#  API CALLS
-# ─────────────────────────────────────────────
-def api_headers(token: str) -> dict:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type":  "application/json",
-        "Accept":        "application/json",
-    }
-
-
-def fetch_available_slots(token: str, target_date: datetime) -> list:
-    """
-    Call the MiClub API to get available tee times for the target date.
-    MiClub's React app uses a REST API at /api/... endpoints.
-    """
-    date_str = target_date.strftime("%Y-%m-%d")
-    base = CONFIG["api_base"]
-    resource_id = CONFIG["booking_resource_id"]
-
-    # Common MiClub API endpoint patterns
-    endpoints_to_try = [
-        f"https://{base}/api/booking/teetimes?date={date_str}&resourceId={resource_id}",
-        f"https://{base}/api/teetimes?date={date_str}&bookingResourceId={resource_id}",
-        f"https://{base}/api/eventlist?date={date_str}&resourceId={resource_id}",
-    ]
-
-    for endpoint in endpoints_to_try:
-        try:
-            log.info(f"Trying API endpoint: {endpoint}")
-            resp = requests.get(endpoint, headers=api_headers(token), timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                log.info(f"Got response from {endpoint}")
-                return data
-            else:
-                log.debug(f"  → {resp.status_code}")
-        except Exception as e:
-            log.debug(f"  → Error: {e}")
-
-    log.warning("Could not fetch slots via API — will fall back to UI scraping.")
-    return []
-
-
-def book_slot_via_api(token: str, slot: dict) -> bool:
-    """Attempt to book a specific tee time slot via the API."""
-    base = CONFIG["api_base"]
-    resource_id = CONFIG["booking_resource_id"]
-
-    # Extract slot identifiers — field names vary by MiClub version
-    slot_id   = slot.get("id") or slot.get("slotId") or slot.get("teeTimeId")
-    slot_time = slot.get("time") or slot.get("startTime") or slot.get("teeTime")
-
-    if not slot_id:
-        log.warning("Could not identify slot ID from API response.")
-        return False
-
-    payload = {
-        "bookingResourceId": resource_id,
-        "slotId":            slot_id,
-        "numberOfPlayers":   CONFIG["num_players"],
-    }
-
-    endpoints_to_try = [
-        f"https://{base}/api/booking/book",
-        f"https://{base}/api/booking/create",
-        f"https://{base}/api/teetimes/book",
-    ]
-
-    for endpoint in endpoints_to_try:
-        try:
-            log.info(f"Attempting to book slot {slot_time} via {endpoint}")
-            resp = requests.post(endpoint, headers=api_headers(token), json=payload, timeout=15)
-            if resp.status_code in (200, 201):
-                log.info(f"✓ Booking confirmed via API! Slot: {slot_time}")
-                return True
-            else:
-                log.debug(f"  → {resp.status_code}: {resp.text[:200]}")
-        except Exception as e:
-            log.debug(f"  → Error: {e}")
-
-    return False
-
-
-# ─────────────────────────────────────────────
-#  UI FALLBACK — click through the React app
-# ─────────────────────────────────────────────
-def book_via_ui(page, target_date: datetime) -> bool:
-    """
-    Fallback: interact with the React-rendered tee sheet directly.
-    Waits for React to render, then finds and clicks the best available slot.
-    """
-    log.info("Falling back to UI-based booking...")
-
-    # Navigate to booking page and wait for React to render
-    page.goto(CONFIG["booking_url"], wait_until="networkidle")
-    log.info("Waiting for React tee sheet to render...")
-
-    # Wait up to 15s for tee time slots to appear
-    try:
-        page.wait_for_selector(
-            "[class*='teetime'], [class*='tee-time'], [class*='slot'], "
-            "[class*='booking-row'], [data-time], [class*='available']",
-            timeout=15000
-        )
-    except PlaywrightTimeout:
-        log.warning("Tee sheet did not render within 15s. Taking debug screenshot.")
-        page.screenshot(path=f"debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png", full_page=True)
-        return False
-
-    # Look for the target date — the React app may show a week view with day headers
-    date_label = target_date.strftime("%-d %b")  # e.g. "12 Apr" — Mac/Linux format
-    try:
-        page.click(f"text={date_label}", timeout=5000)
-        page.wait_for_load_state("networkidle")
-        log.info(f"Navigated to date: {date_label}")
-    except Exception:
-        log.debug("Could not click date label — may already be on correct date.")
-
-    # Find all booking buttons/rows
-    page.wait_for_timeout(2000)
-
-    # Try multiple selector patterns that MiClub React uses
-    slot_selectors = [
-        "button:has-text('Book')",
-        "[class*='available'] button",
-        "[class*='teetime'][class*='available']",
-        "td.open a",
-        "[data-available='true'] button",
-    ]
-
-    for selector in slot_selectors:
-        slots = page.locator(selector).all()
-        if slots:
-            log.info(f"Found {len(slots)} slots with selector: {selector}")
-            for slot in slots:
-                try:
-                    # Get surrounding text to find the time
-                    parent_text = slot.locator("xpath=ancestor::*[3]").first.inner_text()
-                    times = re.findall(r'\b([01]?\d|2[0-3]):[0-5]\d\b', parent_text)
-                    if not times:
-                        continue
-                    slot_time = times[0].zfill(5)
-                    log.info(f"  Slot time: {slot_time}")
-                    if time_in_window(slot_time):
-                        log.info(f"  ✓ Within window — clicking to book {slot_time}...")
-                        slot.click()
-                        page.wait_for_load_state("networkidle")
-                        page.wait_for_timeout(1500)
-
-                        # Look for and click any confirmation step
-                        for confirm_sel in [
-                            "button:has-text('Confirm')",
-                            "button:has-text('Submit')",
-                            "button:has-text('Book Now')",
-                            "input[value='Confirm']",
-                        ]:
-                            try:
-                                btn = page.locator(confirm_sel).first
-                                if btn.is_visible(timeout=3000):
-                                    btn.click()
-                                    page.wait_for_load_state("networkidle")
-                                    log.info("  ✓ Confirmation clicked!")
-                                    break
-                            except Exception:
-                                continue
-
-                        return True
-                except Exception as e:
-                    log.debug(f"  Skipping slot: {e}")
-                    continue
-
-    log.warning("No bookable slots found within preferred time window via UI.")
-    return False
-
-
-# ─────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────
 def run():
-    if not CONFIG["username"] or not CONFIG["password"]:
-        log.error("Credentials missing. Add GOLF_USERNAME and GOLF_PASSWORD to your .env file.")
-        sys.exit(1)
-
-    target_date = get_target_date()
-    log.info(f"{'='*50}")
-    log.info(f"Target date:   {target_date.strftime('%A %d %B %Y')}")
-    log.info(f"Players:       {CONFIG['num_players']}")
-    log.info(f"Time window:   {CONFIG['earliest_time']} – {CONFIG['latest_time']}")
-    log.info(f"{'='*50}")
-
-    booked = False
+    target_date = datetime.strptime(CONFIG["booking_date"], "%Y-%m-%d")
+    book_btn    = "BOOK GROUP" if CONFIG["book_mode"] == "group" else "BOOK ME"
+    tee_filter  = CONFIG["tee"]  # e.g. "1ST TEE" or "10TH TEE"
+    log.info("=" * 50)
+    log.info(f"Target:  {target_date.strftime('%A %d %B %Y')}")
+    log.info(f"Mode:    {book_btn}  |  Tee: {tee_filter}")
+    log.info(f"Window:  {CONFIG['earliest_time']}–{CONFIG['latest_time']}")
+    log.info("=" * 50)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=CONFIG["headless"])
-        context = browser.new_context()
-        page = context.new_page()
+        page    = browser.new_context().new_page()
 
-        # ── 1. LOGIN ──────────────────────────────────────────────────────
+        # ── LOGIN ─────────────────────────────────────────────
         log.info("Logging in...")
         page.goto(CONFIG["login_url"], wait_until="networkidle")
+        for sel in ['input[name="memberLogin"]', 'input[name="username"]', 'input[type="text"]:visible']:
+            if page.locator(sel).count() > 0:
+                page.fill(sel, CONFIG["username"]); break
+        for sel in ['input[name="memberPassword"]', 'input[name="password"]', 'input[type="password"]']:
+            if page.locator(sel).count() > 0:
+                page.fill(sel, CONFIG["password"]); break
+        for sel in ['input[type="submit"]', 'button[type="submit"]', 'button:has-text("Login")']:
+            if page.locator(sel).count() > 0:
+                page.click(sel); break
+        page.wait_for_load_state("networkidle")
+        if any(x in page.inner_text("body").lower() for x in ["invalid password", "login failed"]):
+            log.error("Login failed."); page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
+        log.info("Logged in successfully.")
 
+        # ── NAVIGATE TO BOOKING PAGE ──────────────────────────
+        page.goto(CONFIG["booking_url"], wait_until="networkidle")
+        page.wait_for_timeout(4000)
+
+        # ── FIND AND NAVIGATE TO TARGET DATE ──────────────────
+        date_label = target_date.strftime("%d %b").lstrip("0")
+        log.info(f"Looking for date: {date_label}")
+        booked = False
         try:
-            # Dump the login form to help debug field names
-            form_html = page.inner_html("form") if page.locator("form").count() > 0 else page.content()
-            log.info("Login page loaded. Saving debug screenshot...")
-            page.screenshot(path="login_page_debug.png")
-
-            # Log all input field names found on the page
-            inputs = page.locator("input").all()
-            for inp in inputs:
-                name = inp.get_attribute("name") or ""
-                type_ = inp.get_attribute("type") or ""
-                log.info(f"  Found input: name='{name}' type='{type_}'")
-
-            # Fill username — try all known MiClub field names
-            filled_user = False
-            for selector in ['input[name="memberLogin"]', 'input[name="username"]',
-                             'input[name="login"]', 'input[name="user"]',
-                             'input[type="text"]:visible']:
+            # The page uses React divs not tables.
+            # Each event is a div.full containing div.event-date and a.eventStatusOpen
+            # Find all "full" event blocks and match by date text
+            page.wait_for_selector(".full", timeout=10000)
+            event_blocks = page.locator(".full").all()
+            log.info(f"Found {len(event_blocks)} event blocks on page")
+            found = False
+            for block in event_blocks:
                 try:
-                    if page.locator(selector).count() > 0:
-                        page.fill(selector, CONFIG["username"])
-                        log.info(f"  Filled username with selector: {selector}")
-                        filled_user = True
-                        break
-                except Exception:
+                    block_text = block.inner_text(timeout=500)
+                    if date_label not in block_text:
+                        continue
+                    log.info(f"Found block containing {date_label}")
+                    # Find the OPEN link in this block
+                    open_link = block.locator("a.eventStatusOpen").first
+                    if open_link.count() == 0:
+                        log.warning(f"Date found but status is not OPEN (may be LOCKED or VIEW ONLY)")
+                        page.screenshot(path="not_open.png")
+                        browser.close(); sys.exit(1)
+                    href = open_link.get_attribute("href")
+                    log.info(f"Navigating to: {href}")
+                    page.goto(f"https://www.thelakesgolfclub.com.au{href}", wait_until="networkidle")
+                    page.wait_for_timeout(3000)
+                    found = True
+                    break
+                except Exception as e:
+                    log.debug(f"Block error: {e}")
                     continue
+            if not found:
+                log.warning(f"Date {date_label} not found on page")
+                page.screenshot(path="date_not_found.png")
+                browser.close(); sys.exit(1)
 
-            # Fill password
-            filled_pass = False
-            for selector in ['input[name="memberPassword"]', 'input[name="password"]',
-                             'input[name="pass"]', 'input[type="password"]']:
+            # ── SCAN TEE SHEET: each tee time is a div.row-time ────
+            # Time + tee are in the row text; bookable slots have data-rowid cells
+            page.wait_for_selector("div.row-time", timeout=10000)
+            page.wait_for_timeout(2000)
+
+            btn_label  = "Book Group" if CONFIG["book_mode"] == "group" else "Book Me"
+            tee_filter = CONFIG["tee"]
+            book_mode  = CONFIG["book_mode"]  # group, join, or new
+
+            tee_rows = page.locator("div.row-time").all()
+            log.info(f"Found {len(tee_rows)} tee time rows")
+
+            for tee_row in tee_rows:
                 try:
-                    if page.locator(selector).count() > 0:
-                        page.fill(selector, CONFIG["password"])
-                        log.info(f"  Filled password with selector: {selector}")
-                        filled_pass = True
-                        break
-                except Exception:
+                    row_text = tee_row.inner_text(timeout=500)
+
+                    # Tee filter
+                    if tee_filter == "1ST TEE" and "1st Tee" not in row_text:
+                        continue
+                    if tee_filter == "10TH TEE" and "10th Tee" not in row_text:
+                        continue
+
+                    # Extract time e.g. "3:32 pm"
+                    times = re.findall(r"\b(\d{1,2}:\d{2})\s*(am|pm)\b", row_text, re.IGNORECASE)
+                    if not times:
+                        continue
+                    raw_time = times[0][0] + " " + times[0][1].upper()
+                    try:
+                        t24 = datetime.strptime(raw_time, "%I:%M %p").strftime("%H:%M")
+                    except:
+                        t24 = times[0][0].zfill(5)
+
+                    if not time_in_window(t24):
+                        continue
+
+                    # Check bookable cells exist
+                    cells    = tee_row.locator("[data-rowid]").all()
+                    if not cells:
+                        continue
+
+                    bme_btns  = tee_row.locator("span.btn-label").all()
+                    bme_count = len(bme_btns)
+                    has_players = len(cells) > bme_count
+
+                    log.info(f"  {raw_time} ({tee_filter}): {bme_count}/{len(cells)} spots free")
+
+                    # Mode filter
+                    if book_mode == "join" and not has_players:
+                        log.debug("  Skipping — no existing players (mode=join)")
+                        continue
+                    if book_mode == "new" and has_players:
+                        log.debug("  Skipping — row has players (mode=new)")
+                        continue
+
+                    # Select button
+                    if book_mode == "group":
+                        btn = tee_row.locator("#btn-book-group").first
+                    else:
+                        btn = tee_row.locator("span.btn-label").filter(has_text="Book Me").first
+
+                    if btn.count() == 0 or not btn.is_visible(timeout=1000):
+                        log.debug("  Button not visible")
+                        continue
+
+                    log.info(f"  Clicking '{btn_label}' at {raw_time}...")
+                    btn.click()
+                    page.wait_for_load_state("networkidle")
+                    page.wait_for_timeout(2000)
+
+                    # Confirmation dialog
+                    for cs in ["button:has-text('Confirm')", "button:has-text('OK')", "button:has-text('Yes')", "button:has-text('Submit')"]:
+                        try:
+                            cb = page.locator(cs).first
+                            if cb.is_visible(timeout=2000):
+                                cb.click(); page.wait_for_load_state("networkidle")
+                                log.info("  Confirmation clicked"); break
+                        except: continue
+
+                    booked = True
+                    log.info(f"  ✅ Booked '{btn_label}' at {raw_time}!")
+                    break
+
+                except Exception as e:
+                    log.debug(f"  Row error: {e}")
                     continue
-
-            if not filled_user or not filled_pass:
-                log.error("Could not find login form fields. Check login_page_debug.png")
-                browser.close()
-                sys.exit(1)
-
-            # Submit
-            for selector in ['input[type="submit"]', 'button[type="submit"]',
-                             'button:has-text("Login")', 'button:has-text("Log In")',
-                             'input[value="Login"]', 'input[value="Log In"]']:
-                try:
-                    if page.locator(selector).count() > 0:
-                        page.click(selector)
-                        log.info(f"  Clicked submit with selector: {selector}")
-                        break
-                except Exception:
-                    continue
-
-            page.wait_for_load_state("networkidle")
-            page.screenshot(path="after_login_debug.png")
-            log.info("Post-login screenshot saved: after_login_debug.png")
 
         except Exception as e:
-            log.error(f"Login interaction failed: {e}")
-            page.screenshot(path="login_error.png")
-            browser.close()
-            sys.exit(1)
+            log.warning(f"Booking error: {e}")
 
-        # Check for login failure — but be lenient since "error" appears in many page elements
-        page_text = page.inner_text("body").lower()
-        if any(x in page_text for x in ["invalid password", "incorrect password", "login failed", "invalid username"]):
-            log.error("Login appears to have failed. Check your username and password.")
-            page.screenshot(path="login_failed.png")
-            browser.close()
-            sys.exit(1)
-
-        log.info("Login successful.")
-
-        # ── 2. NAVIGATE TO BOOKING PAGE TO GET JWT TOKEN ──────────────────
-        log.info("Loading booking page to retrieve auth token...")
-        page.goto(CONFIG["booking_url"], wait_until="networkidle")
-        page.wait_for_timeout(3000)  # Give React time to initialise and set localStorage
-
-        token = extract_jwt_from_page(page)
-
-        # ── 3. TRY API BOOKING FIRST ──────────────────────────────────────
-        if token:
-            slots = fetch_available_slots(token, target_date)
-
-            if slots:
-                # Flatten response — API may return list directly or nested
-                if isinstance(slots, dict):
-                    slots = slots.get("teetimes") or slots.get("slots") or slots.get("data") or []
-
-                log.info(f"Found {len(slots)} slots from API.")
-
-                for slot in slots:
-                    slot_time = slot.get("time") or slot.get("startTime") or slot.get("teeTime", "")
-                    # Normalise time format
-                    time_match = re.search(r'(\d{1,2}:\d{2})', str(slot_time))
-                    if time_match and time_in_window(time_match.group(1)):
-                        log.info(f"Preferred slot found: {slot_time}")
-                        booked = book_slot_via_api(token, slot)
-                        if booked:
-                            break
-            else:
-                log.info("API returned no slots — trying UI approach.")
-
-        # ── 4. FALLBACK TO UI IF API DIDN'T WORK ─────────────────────────
-        if not booked:
-            booked = book_via_ui(page, target_date)
-
-        # ── 5. SAVE SCREENSHOT AS RECORD ─────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        screenshot_path = f"booking_{'success' if booked else 'failed'}_{ts}.png"
-        page.screenshot(path=screenshot_path, full_page=True)
-        log.info(f"Screenshot saved: {screenshot_path}")
-
+        fn = f"booking_{'success' if booked else 'failed'}_{ts}.png"
+        page.screenshot(path=fn, full_page=True)
+        log.info(f"Screenshot saved: {fn}")
         browser.close()
 
     if booked:
         log.info("✅ Tee time booked successfully!")
     else:
-        log.warning("❌ Could not book a tee time. Check the screenshot and logs.")
-
-    return booked
-
+        log.warning("❌ No booking made — check screenshot for details.")
 
 if __name__ == "__main__":
-    success = run()
-    sys.exit(0 if success else 1)
+    run()
