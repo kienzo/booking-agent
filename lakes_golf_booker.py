@@ -1,9 +1,8 @@
 """
 The Lakes Golf Club - Automated Tee Time Booker
-Generated: 26/02/2026 | OS: Windows | Mode: Book Group
+Generated: 26/02/2026 | Mode: Book Group
 ================================================
-Run: python lakes_golf_booker.py
-# Schedule: schtasks /create /tn "Lakes Golf Booker" /tr "python C:\golf-booker\lakes_golf_booker.py" /sc weekly /d THU /st 11:30 /f
+Runs via GitHub Actions automatically
 """
 
 import os, sys, re, logging
@@ -74,7 +73,7 @@ def run():
         page.wait_for_timeout(4000)
 
         # ── FIND AND NAVIGATE TO TARGET DATE ──────────────────
-        date_label = target_date.strftime("%d %b").lstrip("0")
+        date_label = target_date.strftime("%-d %b")
         log.info(f"Looking for date: {date_label}")
         booked = False
         try:
