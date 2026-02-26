@@ -15,7 +15,7 @@ load_dotenv()
 CONFIG = {
     "username":      os.getenv("GOLF_USERNAME"),  # Set GOLF_USERNAME in GitHub Secrets
     "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets
-    "booking_date":  "2026-03-15",   # Sunday 15 March 2026
+    "booking_date":  "2026-03-28",   # Saturday 28 March 2026
     "book_mode":     "group",  # Clicks "BOOK GROUP" — books the whole tee time
     "tee":           "1ST TEE",       # Only book slots starting from this tee
     "earliest_time": "08:00",
