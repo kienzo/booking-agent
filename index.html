@@ -726,14 +726,30 @@ async function addScheduleEntry(entry) {
 }
 
 async function deleteScheduleEntry(playDate) {
+  const pin = document.getElementById('ghPin').value.trim();
+  if (!pin) {
+    alert('Enter your PIN in Section 05 first, then try deleting again.');
+    document.getElementById('ghPin').focus();
+    document.getElementById('ghPin').scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
   const token = await getToken();
-  if (!token) { alert('Enter your PIN first (Section 05) so the deletion can be saved.'); return; }
-  // Always fetch fresh to get latest SHA — avoids mismatch errors
-  const fresh = await fetchScheduleFromGitHub();
-  const entries = fresh.filter(e => e.playDate !== playDate);
-  await pushScheduleToGitHub(entries);
-  _scheduleCache = entries;
-  renderSchedule(entries);
+  if (!token) { alert('Wrong PIN — token could not be decrypted.'); return; }
+
+  // Show deleting state on the row
+  const rows = document.querySelectorAll('.sched-delete');
+  rows.forEach(b => b.disabled = true);
+
+  try {
+    const fresh   = await fetchScheduleFromGitHub();
+    const entries = fresh.filter(e => e.playDate !== playDate);
+    await pushScheduleToGitHub(entries);
+    _scheduleCache = entries;
+    renderSchedule(entries);
+  } catch(err) {
+    alert('Delete failed: ' + err.message);
+    rows.forEach(b => b.disabled = false);
+  }
 }
 
 async function initSchedule() {
