@@ -1,6 +1,6 @@
 """
 The Lakes Golf Club - Automated Tee Time Booker
-Generated: 27/02/2026 | Mode: Book Group
+Generated: 27/02/2026 | Mode: Book Me
 ================================================
 Runs via GitHub Actions automatically
 """
@@ -16,10 +16,10 @@ CONFIG = {
     "username":      os.getenv("GOLF_USERNAME"),  # Set GOLF_USERNAME in GitHub Secrets
     "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets
     "booking_date":  "2026-03-06",   # Friday 6 March 2026
-    "book_mode":     "group",  # Clicks "BOOK GROUP" — books the whole tee time
+    "book_mode":     "new",  # Clicks "BOOK ME" on a fully empty row (no one else booked yet)
     "tee":           "ANY",       # Only book slots starting from this tee
-    "earliest_time": "13:30",
-    "latest_time":   "14:00",
+    "earliest_time": "14:00",
+    "latest_time":   "14:30",
     "headless":      True,               # Must be True on GitHub Actions (no display)
     "login_url":     "https://www.thelakesgolfclub.com.au/security/login.msp",
     "booking_url":   "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",
@@ -59,13 +59,19 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=CONFIG["headless"])
         page    = browser.new_context().new_page()
-
         # ── LOGIN ───────────────────────────────────────────
         log.info("Logging in...")
         page.goto(CONFIG["login_url"], wait_until="networkidle")
-        for sel in ['input[name="memberLogin"]', 'input[name="username"]', 'input[type="text"]:visible']:
+        page.wait_for_timeout(2000)
+        log.info(f"Login page URL: {page.url}")
+        filled_user = False
+        for sel in ['input[name="memberLogin"]', 'input[name="username"]', 'input[name="MembershipNo"]', 'input[type="text"]:visible']:
             if page.locator(sel).count() > 0:
-                page.fill(sel, CONFIG["username"]); break
+                page.fill(sel, CONFIG["username"])
+                log.info(f"Filled username into: {sel}")
+                filled_user = True; break
+        if not filled_user:
+            log.error("Could not find username field"); page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
         for sel in ['input[name="memberPassword"]', 'input[name="password"]', 'input[type="password"]']:
             if page.locator(sel).count() > 0:
                 page.fill(sel, CONFIG["password"]); break
@@ -73,19 +79,25 @@ def run():
             if page.locator(sel).count() > 0:
                 page.click(sel); break
         page.wait_for_load_state("networkidle")
-        if any(x in page.inner_text("body").lower() for x in ["invalid password", "login failed"]):
-            log.error("Login failed."); page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
+        page.wait_for_timeout(2000)
+        log.info(f"Post-login URL: {page.url}")
+        log.info(f"Post-login title: {page.title()}")
+        if "login" in page.url.lower() or "login" in page.title().lower():
+            log.error("Login failed — still on login page. Check GOLF_USERNAME / GOLF_PASSWORD secrets.")
+            page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
         log.info("Logged in successfully.")
 
         # ── NAVIGATE TO BOOKING PAGE ─────────────────────────
         page.goto(CONFIG["booking_url"], wait_until="networkidle")
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(6000)  # extra wait for calendar to render
 
         # ── FIND TARGET DATE ────────────────────────────────
         log.info(f"Looking for date: {date_label}")
+        log.info(f"Page title: {page.title()}")
+        log.info(f"Page URL: {page.url}")
         booked = False
         try:
-            page.wait_for_selector(".full", timeout=10000)
+            page.wait_for_selector(".full", timeout=20000)
             event_blocks = page.locator(".full").all()
             log.info(f"Found {len(event_blocks)} event blocks on page")
             found = False
