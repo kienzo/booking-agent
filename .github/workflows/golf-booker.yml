@@ -24,3 +24,10 @@ jobs:
           GOLF_USERNAME: ${{ secrets.GOLF_USERNAME }}
           GOLF_PASSWORD: ${{ secrets.GOLF_PASSWORD }}
         run: python lakes_golf_booker.py
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-screenshot
+          path: booking_*.png
