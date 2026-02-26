@@ -263,19 +263,25 @@
       </div>
       <!-- hidden field keeps API compatibility -->
       <input type="hidden" id="ghToken" />
-      <div class="field">
-        <label>How many days before your play date does booking open?</label>
-        <select id="daysAdvance">
-          <option value="7">7 days before</option>
-          <option value="8">8 days before</option>
-          <option value="9">9 days before</option>
-          <option value="10" selected>10 days before</option>
-          <option value="14">14 days before</option>
-          <option value="21">21 days before</option>
-          <option value="28">28 days before</option>
-        </select>
-        <p class="date-hint" id="scheduleHint">Script will be scheduled to run automatically on the correct date</p>
+      <div class="field-row">
+        <div class="field" style="margin:0">
+          <label>How many days before does booking open?</label>
+          <select id="daysAdvance">
+            <option value="7">7 days before</option>
+            <option value="8">8 days before</option>
+            <option value="9">9 days before</option>
+            <option value="10" selected>10 days before</option>
+            <option value="14">14 days before</option>
+            <option value="21">21 days before</option>
+            <option value="28">28 days before</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label>What time do bookings open? (local time)</label>
+          <input type="time" id="openTime" value="07:00" />
+        </div>
       </div>
+      <p class="date-hint" id="scheduleHint" style="margin-top:8px;">Script will run 1 minute before bookings open</p>
     </div>
   </div>
 
@@ -637,18 +643,29 @@ async function getToken() {
 
 // Update schedule hint when date or days-advance changes
 function updateScheduleHint() {
-  const dateVal = document.getElementById('bookingDate').value;
-  const days    = parseInt(document.getElementById('daysAdvance').value);
+  const dateVal  = document.getElementById('bookingDate').value;
+  const days     = parseInt(document.getElementById('daysAdvance').value);
+  const openTime = document.getElementById('openTime').value || '07:00';
   if (!dateVal) return;
+
   const play   = new Date(dateVal + 'T00:00:00');
   const runDay = new Date(play);
   runDay.setDate(play.getDate() - days);
+
+  // Calculate run time = openTime minus 1 minute
+  const [openH, openM] = openTime.split(':').map(Number);
+  let runM = openM - 1, runH = openH;
+  if (runM < 0) { runM = 59; runH -= 1; }
+  if (runH < 0)   runH = 23;
+  const runTimeFmt = String(runH).padStart(2,'0') + ':' + String(runM).padStart(2,'0');
+
   const niceRun  = runDay.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
   const nicePlay = play.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
   document.getElementById('scheduleHint').innerHTML =
-    'Script will auto-run on <span style="color:var(--green-light)">' + niceRun + '</span> — ' + days + ' days before your round on <span style="color:var(--green-light)">' + nicePlay + '</span>';
+    'Script runs at <span style="color:var(--green-light)">' + runTimeFmt + '</span> on <span style="color:var(--green-light)">' + niceRun + '</span> — 1 min before bookings open at ' + openTime + ', ' + days + ' days before your round on <span style="color:var(--green-light)">' + nicePlay + '</span>';
 }
 document.getElementById('daysAdvance').addEventListener('change', updateScheduleHint);
+document.getElementById('openTime').addEventListener('change', updateScheduleHint);
 dp.addEventListener('change', updateScheduleHint);
 updateScheduleHint();
 
@@ -781,7 +798,7 @@ function renderSchedule(entries) {
         <div class="sched-play-date">${playNice}</div>
         <div class="sched-meta">
           <span class="${badgeClass} badge">${badge}</span>
-          <span class="sched-detail">Script runs ${runNice}</span>
+          <span class="sched-detail">Script runs ${runNice} at ${e.runTime || '—'}</span>
           <span class="sched-detail">⛳ ${e.tee}</span>
           <span class="sched-detail">🕐 ${e.earliest}–${e.latest}</span>
           <span class="sched-detail">${e.mode === 'group' ? '👥 Group' : e.mode === 'join' ? '🤝 Join' : '🏌️ New Slot'}</span>
@@ -810,18 +827,39 @@ async function generateAndPush() {
   // Generate the script first
   generate();
 
-  const script     = window._script;
-  const days       = parseInt(document.getElementById('daysAdvance').value);
-  const play       = new Date(dateVal + 'T00:00:00');
-  const runDay     = new Date(play);
+  const script    = window._script;
+  const days      = parseInt(document.getElementById('daysAdvance').value);
+  const openTime  = document.getElementById('openTime').value || '07:00';
+  const play      = new Date(dateVal + 'T00:00:00');
+  const runDay    = new Date(play);
   runDay.setDate(play.getDate() - days);
 
-  // Build cron: run at 06:00 UTC on the exact run day
-  const cronMin  = 0;
-  const cronHour = 6;
-  const cronDay  = runDay.getDate();
-  const cronMon  = runDay.getMonth() + 1;
+  // Calculate local run time = bookings open time minus 1 minute
+  const [openH, openM] = openTime.split(':').map(Number);
+  let localRunM = openM - 1, localRunH = openH;
+  if (localRunM < 0) { localRunM = 59; localRunH -= 1; }
+  if (localRunH < 0)   localRunH = 23;
+
+  // Convert local Sydney time to UTC for cron (AEST=UTC+10, AEDT=UTC+11)
+  // Detect DST: Sydney observes AEDT Oct–Apr, AEST Apr–Oct (approx)
+  const runMonth = runDay.getMonth() + 1; // 1-12
+  const isDST    = runMonth >= 10 || runMonth <= 4;
+  const offset   = isDST ? 11 : 10;
+  let cronH = localRunH - offset;
+  let cronDayOffset = 0;
+  if (cronH < 0) { cronH += 24; cronDayOffset = -1; }
+
+  // Adjust day if cron fires on previous UTC day
+  const cronRunDay = new Date(runDay);
+  cronRunDay.setDate(runDay.getDate() + cronDayOffset);
+  const cronMin  = localRunM;
+  const cronHour = cronH;
+  const cronDay  = cronRunDay.getDate();
+  const cronMon  = cronRunDay.getMonth() + 1;
   const cronExpr = cronMin + ' ' + cronHour + ' ' + cronDay + ' ' + cronMon + ' *';
+
+  const localRunTimeFmt = String(localRunH).padStart(2,'0') + ':' + String(localRunM).padStart(2,'0');
+  const utcTimeFmt      = String(cronHour).padStart(2,'0') + ':' + String(cronMin).padStart(2,'0');
 
   const nicePlay = play.toLocaleDateString('en-AU', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const niceRun  = runDay.toLocaleDateString('en-AU', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
@@ -829,7 +867,7 @@ async function generateAndPush() {
   const workflow =
 `# Auto-generated by The Lakes Golf Booker UI
 # Play date: ${nicePlay}
-# Script runs: ${niceRun} (${days} days before)
+# Script runs: ${niceRun} at ${localRunTimeFmt} local / ${utcTimeFmt} UTC (1 min before bookings open at ${openTime})
 name: Golf Booker
 
 on:
@@ -878,7 +916,7 @@ jobs:
     // Step 3: Push workflow
     renderStep('workflow', '⚙️', 'Scheduling GitHub Actions workflow', 'Setting cron to run on ' + niceRun + '...', 'running');
     await upsertFile(token, REPO, '.github/workflows/golf-booker.yml', workflow, '🕐 Schedule run for ' + niceRun + ' (plays ' + dateVal + ')');
-    renderStep('workflow', '✅', 'Workflow scheduled', 'Cron: ' + cronExpr + ' UTC — runs ' + niceRun, 'success');
+    renderStep('workflow', '✅', 'Workflow scheduled', 'Runs ' + niceRun + ' at ' + localRunTimeFmt + ' local (' + utcTimeFmt + ' UTC) — 1 min before bookings open', 'success');
 
     // Step 4: Save booking to schedule.json in repo
     renderStep('sched', '📅', 'Saving to booking schedule', 'Writing schedule.json to repository...', 'running');
@@ -889,6 +927,8 @@ jobs:
       earliest: document.getElementById('earliest').value,
       latest:   document.getElementById('latest').value,
       mode:     document.querySelector('input[name="booktype"]:checked').value,
+      openTime: openTime,
+      runTime: localRunTimeFmt,
       pushedAt: new Date().toISOString()
     });
     renderStep('sched', '✅', 'Schedule saved to GitHub', 'schedule.json updated — visible from any device', 'success');
