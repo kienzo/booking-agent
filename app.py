@@ -5,7 +5,10 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return send_from_directory("templates", "golf_booker_ui.html")
+    return send_from_directory(
+        os.path.join(os.path.dirname(__file__), "templates"),
+        "golf_booker_ui.html"
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
