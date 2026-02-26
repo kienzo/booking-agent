@@ -32,14 +32,8 @@
   .field-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
   .field { margin-bottom:16px; } .field:last-child { margin-bottom:0; }
 
-  /* OS */
-  .os-options { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .os-chip,.book-chip { position:relative; }
-  .os-chip input,.book-chip input { position:absolute; opacity:0; }
-  .os-chip label { display:flex; align-items:center; justify-content:center; gap:10px; padding:18px; border:1px solid var(--cream-dark); background:var(--cream); cursor:pointer; font-size:13px; letter-spacing:1px; color:var(--text-muted); transition:all .2s; border-radius:1px; margin:0; }
-  .os-icon { font-size:22px; }
-  .os-chip input:checked+label { background:var(--green); border-color:var(--green); color:var(--gold-light); }
-  .os-chip label:hover { border-color:var(--green-light); }
+  .book-chip { position:relative; }
+  .book-chip input { position:absolute; opacity:0; }
 
   /* BOOK TYPE */
   .book-options { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -138,17 +132,6 @@
 <main>
   <h1 class="page-title">Configure your<br/>booking agent</h1>
   <p class="page-subtitle">Fill in the details below to generate your personalised booking script</p>
-
-  <!-- OS -->
-  <div class="section">
-    <div class="section-header"><span class="section-num">00</span><span class="section-title">Operating System</span></div>
-    <div class="section-body">
-      <div class="os-options">
-        <div class="os-chip"><input type="radio" name="os" id="os-windows" value="windows" checked /><label for="os-windows"><span class="os-icon">🪟</span>Windows</label></div>
-        <div class="os-chip"><input type="radio" name="os" id="os-mac" value="mac" /><label for="os-mac"><span class="os-icon">🍎</span>Mac</label></div>
-      </div>
-    </div>
-  </div>
 
   <!-- BOOKING TYPE -->
   <div class="section">
@@ -350,7 +333,6 @@ function updateHint() {
 function generate() {
   const earliest  = document.getElementById('earliest').value;
   const latest    = document.getElementById('latest').value;
-  const os        = document.querySelector('input[name="os"]:checked').value;
   const booktype  = document.querySelector('input[name="booktype"]:checked').value;
   const tee       = document.querySelector('input[name="tee"]:checked').value;
   const dateVal   = document.getElementById('bookingDate').value;
@@ -361,13 +343,7 @@ function generate() {
   const dayName  = d.toLocaleDateString('en-AU', {weekday:'long'});
   const dateNice = d.toLocaleDateString('en-AU', {day:'numeric',month:'long',year:'numeric'});
 
-  const isWin   = os === 'windows';
   const isGroup = booktype === 'group';
-  const pyCmd   = isWin ? 'python' : 'python3';
-  const dateFmt = isWin ? 'target_date.strftime("%d %b").lstrip("0")' : 'target_date.strftime("%-d %b")';
-  const sched   = isWin
-    ? '# Schedule: schtasks /create /tn "Lakes Golf Booker" /tr "python C:\\golf-booker\\lakes_golf_booker.py" /sc weekly /d THU /st 11:30 /f'
-    : '# Schedule (crontab -e): 30 11 * * 4 /usr/bin/python3 ~/golf-booker/lakes_golf_booker.py >> booker.log 2>&1';
 
   const bookBtnSelector = isGroup
     ? '"BOOK GROUP"'
@@ -381,10 +357,9 @@ function generate() {
   const script =
 '"""\n' +
 'The Lakes Golf Club - Automated Tee Time Booker\n' +
-'Generated: ' + new Date().toLocaleDateString('en-AU') + ' | OS: ' + (isWin?'Windows':'Mac') + ' | Mode: ' + (isGroup?'Book Group':'Book Me') + '\n' +
+'Generated: ' + new Date().toLocaleDateString('en-AU') + ' | Mode: ' + (isGroup?'Book Group':'Book Me') + '\n' +
 '================================================\n' +
-'Run: ' + pyCmd + ' lakes_golf_booker.py\n' +
-sched + '\n' +
+'Runs via GitHub Actions automatically\n' +
 '"""\n\n' +
 'import os, sys, re, logging\n' +
 'from datetime import datetime\n' +
@@ -445,7 +420,7 @@ sched + '\n' +
 '        page.goto(CONFIG["booking_url"], wait_until="networkidle")\n' +
 '        page.wait_for_timeout(4000)\n\n' +
 '        # ── FIND AND NAVIGATE TO TARGET DATE ──────────────────\n' +
-'        date_label = ' + dateFmt + '\n' +
+'        date_label = target_date.strftime("%-d %b")\n' +
 '        log.info(f"Looking for date: {date_label}")\n' +
 '        booked = False\n' +
 '        try:\n' +
@@ -570,8 +545,7 @@ sched + '\n' +
   const modeDesc = booktype === 'group' ? 'BOOK GROUP (whole tee time)' : booktype === 'join' ? 'BOOK ME on a slot with existing players' : 'BOOK ME on a fresh empty slot';
   document.getElementById('instructions').innerHTML =
     '<p>1. Click <strong>↓ Download .py</strong> to save the script</p>' +
-    '<p>2. Move it to your <code>' + (isWin?'C:\\golf-booker':'~/golf-booker') + '</code> folder alongside your <code>.env</code> file</p>' +
-    '<p>3. Run: <code>' + pyCmd + ' lakes_golf_booker.py</code></p>' +
+    '<p>2. The script runs automatically via GitHub Actions on the scheduled date</p>' +
     '<p>4. It will find the first <strong>' + modeDesc + '</strong> from the <strong>' + tee + '</strong> between <strong>' + earliest + ' – ' + latest + '</strong> on <strong>' + dayName + ' ' + dateNice + '</strong></p>';
 
   const out = document.getElementById('outputSection');
