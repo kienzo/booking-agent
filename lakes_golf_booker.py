@@ -20,7 +20,7 @@ CONFIG = {
     "tee":           "ANY",       # Only book slots starting from this tee
     "earliest_time": "13:30",
     "latest_time":   "14:00",
-    "headless":      False,              # Change to True to run silently
+    "headless":      True,              # Change to True to run silently
     "login_url":     "https://www.thelakesgolfclub.com.au/security/login.msp",
     "booking_url":   "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",
 }
