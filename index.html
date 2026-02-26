@@ -714,7 +714,8 @@ async function pushScheduleToGitHub(entries) {
 }
 
 async function addScheduleEntry(entry) {
-  const entries = _scheduleCache || await fetchScheduleFromGitHub();
+  // Always fetch fresh to get latest SHA — avoids mismatch errors
+  const entries = await fetchScheduleFromGitHub();
   const idx = entries.findIndex(e => e.playDate === entry.playDate);
   if (idx >= 0) entries[idx] = entry; else entries.unshift(entry);
   entries.sort((a,b) => a.playDate < b.playDate ? 1 : -1);
@@ -727,7 +728,9 @@ async function addScheduleEntry(entry) {
 async function deleteScheduleEntry(playDate) {
   const token = await getToken();
   if (!token) { alert('Enter your PIN first (Section 05) so the deletion can be saved.'); return; }
-  const entries = (_scheduleCache || await fetchScheduleFromGitHub()).filter(e => e.playDate !== playDate);
+  // Always fetch fresh to get latest SHA — avoids mismatch errors
+  const fresh = await fetchScheduleFromGitHub();
+  const entries = fresh.filter(e => e.playDate !== playDate);
   await pushScheduleToGitHub(entries);
   _scheduleCache = entries;
   renderSchedule(entries);
