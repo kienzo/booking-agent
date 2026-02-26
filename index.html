@@ -699,11 +699,17 @@ const REPO          = 'kienzo/booking-agent';
 const SCHEDULE_FILE = 'schedule.json';
 let   _scheduleCache = null;
 
-async function fetchScheduleFromGitHub() {
+async function fetchScheduleFromGitHub(token) {
   try {
-    const r = await fetch('https://raw.githubusercontent.com/' + REPO + '/main/' + SCHEDULE_FILE + '?t=' + Date.now());
+    // Use GitHub API (not raw CDN) so we always get the live version, never a cached copy
+    const headers = { 'Accept': 'application/vnd.github.v3+json' };
+    if (token) headers['Authorization'] = 'token ' + token;
+    const r = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + SCHEDULE_FILE, { headers });
     if (!r.ok) return [];
-    return await r.json();
+    const data = await r.json();
+    // Content is base64-encoded
+    const decoded = decodeURIComponent(escape(atob(data.content)));
+    return JSON.parse(decoded);
   } catch(e) { return []; }
 }
 
@@ -714,13 +720,15 @@ async function pushScheduleToGitHub(entries) {
 }
 
 async function addScheduleEntry(entry) {
-  // Always fetch fresh to get latest SHA — avoids mismatch errors
-  const entries = await fetchScheduleFromGitHub();
+  const token = await getToken();
+  if (!token) throw new Error('Wrong PIN — cannot save to cloud');
+  // Use token so GitHub API returns live data, never cached
+  const entries = await fetchScheduleFromGitHub(token);
   const idx = entries.findIndex(e => e.playDate === entry.playDate);
   if (idx >= 0) entries[idx] = entry; else entries.unshift(entry);
   entries.sort((a,b) => a.playDate < b.playDate ? 1 : -1);
   entries.splice(20);
-  await pushScheduleToGitHub(entries);
+  await upsertFile(token, REPO, SCHEDULE_FILE, JSON.stringify(entries, null, 2), 'update booking schedule');
   _scheduleCache = entries;
   renderSchedule(entries);
 }
@@ -741,9 +749,10 @@ async function deleteScheduleEntry(playDate) {
   rows.forEach(b => b.disabled = true);
 
   try {
-    const fresh   = await fetchScheduleFromGitHub();
+    const tok     = await getToken();
+    const fresh   = await fetchScheduleFromGitHub(tok);
     const entries = fresh.filter(e => e.playDate !== playDate);
-    await pushScheduleToGitHub(entries);
+    await upsertFile(tok, REPO, SCHEDULE_FILE, JSON.stringify(entries, null, 2), 'update booking schedule');
     _scheduleCache = entries;
     renderSchedule(entries);
   } catch(err) {
@@ -754,6 +763,7 @@ async function deleteScheduleEntry(playDate) {
 
 async function initSchedule() {
   renderSchedule(null);
+  // No token needed for initial load — uses public API rate limit
   const entries = await fetchScheduleFromGitHub();
   _scheduleCache = entries;
   renderSchedule(entries);
