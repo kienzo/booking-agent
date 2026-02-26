@@ -418,155 +418,169 @@ function generate() {
 '        return lo <= t <= hi\n' +
 '    except ValueError:\n' +
 '        return False\n\n' +
+'def row_has_players(tee_row):\n' +
+'    # Returns True if any cell has class cell-taken (player already booked)\n' +
+'    return tee_row.locator(\"div.cell-taken\").count() > 0\n\n' +
 'def run():\n' +
-'    target_date = datetime.strptime(CONFIG["booking_date"], "%Y-%m-%d")\n' +
-'    book_btn    = "BOOK GROUP" if CONFIG["book_mode"] == "group" else "BOOK ME"\n' +
-'    tee_filter  = CONFIG["tee"]  # e.g. "1ST TEE" or "10TH TEE"\n' +
-'    log.info("=" * 50)\n' +
-'    log.info(f"Target:  {target_date.strftime(\'%A %d %B %Y\')}")\n' +
-'    log.info(f"Mode:    {book_btn}  |  Tee: {tee_filter}")\n' +
-'    log.info(f"Window:  {CONFIG[\'earliest_time\']}–{CONFIG[\'latest_time\']}")\n' +
-'    log.info("=" * 50)\n\n' +
+'    target_date = datetime.strptime(CONFIG[\"booking_date\"], \"%Y-%m-%d\")\n' +
+'    book_mode   = CONFIG[\"book_mode\"]\n' +
+'    tee_filter  = CONFIG[\"tee\"]\n' +
+'    btn_label   = \"Book Group\" if book_mode == \"group\" else \"Book Me\"\n' +
+'    # strftime "%-d" removes leading zero on Linux; "%#d" on Windows\n' +
+'    import platform\n' +
+'    fmt = \"%#d %b\" if platform.system() == \"Windows\" else \"%-d %b\"\n' +
+'    date_label = target_date.strftime(fmt)\n' +
+'    log.info(\"=\" * 50)\n' +
+'    log.info(f\"Target:  {target_date.strftime(\'%A %d %B %Y\')}\")\n' +
+'    log.info(f\"Mode:    {btn_label}  |  Tee: {tee_filter}\")\n' +
+'    log.info(f\"Window:  {CONFIG[\'earliest_time\']}–{CONFIG[\'latest_time\']}\")\n' +
+'    log.info(\"=\" * 50)\n' +
+'\n' +
 '    with sync_playwright() as p:\n' +
-'        browser = p.chromium.launch(headless=CONFIG["headless"])\n' +
-'        page    = browser.new_context().new_page()\n\n' +
-'        # ── LOGIN ─────────────────────────────────────────────\n' +
-'        log.info("Logging in...")\n' +
-'        page.goto(CONFIG["login_url"], wait_until="networkidle")\n' +
-'        for sel in [\'input[name="memberLogin"]\', \'input[name="username"]\', \'input[type="text"]:visible\']:\n' +
+'        browser = p.chromium.launch(headless=CONFIG[\"headless\"])\n' +
+'        page    = browser.new_context().new_page()\n' +
+'\n' +
+'        # ── LOGIN ───────────────────────────────────────────\n' +
+'        log.info(\"Logging in...\")\n' +
+'        page.goto(CONFIG[\"login_url\"], wait_until=\"networkidle\")\n' +
+'        for sel in [\'input[name=\"memberLogin\"]\', \'input[name=\"username\"]\', \'input[type=\"text\"]:visible\']:\n' +
 '            if page.locator(sel).count() > 0:\n' +
-'                page.fill(sel, CONFIG["username"]); break\n' +
-'        for sel in [\'input[name="memberPassword"]\', \'input[name="password"]\', \'input[type="password"]\']:\n' +
+'                page.fill(sel, CONFIG[\"username\"]); break\n' +
+'        for sel in [\'input[name=\"memberPassword\"]\', \'input[name=\"password\"]\', \'input[type=\"password\"]\']:\n' +
 '            if page.locator(sel).count() > 0:\n' +
-'                page.fill(sel, CONFIG["password"]); break\n' +
-'        for sel in [\'input[type="submit"]\', \'button[type="submit"]\', \'button:has-text("Login")\']:\n' +
+'                page.fill(sel, CONFIG[\"password\"]); break\n' +
+'        for sel in [\'input[type=\"submit\"]\', \'button[type=\"submit\"]\', \'button:has-text(\"Login\")\']:\n' +
 '            if page.locator(sel).count() > 0:\n' +
 '                page.click(sel); break\n' +
-'        page.wait_for_load_state("networkidle")\n' +
-'        if any(x in page.inner_text("body").lower() for x in ["invalid password", "login failed"]):\n' +
-'            log.error("Login failed."); page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)\n' +
-'        log.info("Logged in successfully.")\n\n' +
-'        # ── NAVIGATE TO BOOKING PAGE ──────────────────────────\n' +
-'        page.goto(CONFIG["booking_url"], wait_until="networkidle")\n' +
-'        page.wait_for_timeout(4000)\n\n' +
-'        # ── FIND AND NAVIGATE TO TARGET DATE ──────────────────\n' +
-'        date_label = target_date.strftime("%-d %b")\n' +
-'        log.info(f"Looking for date: {date_label}")\n' +
+'        page.wait_for_load_state(\"networkidle\")\n' +
+'        if any(x in page.inner_text(\"body\").lower() for x in [\"invalid password\", \"login failed\"]):\n' +
+'            log.error(\"Login failed.\"); page.screenshot(path=\"login_failed.png\"); browser.close(); sys.exit(1)\n' +
+'        log.info(\"Logged in successfully.\")\n' +
+'\n' +
+'        # ── NAVIGATE TO BOOKING PAGE ─────────────────────────\n' +
+'        page.goto(CONFIG[\"booking_url\"], wait_until=\"networkidle\")\n' +
+'        page.wait_for_timeout(4000)\n' +
+'\n' +
+'        # ── FIND TARGET DATE ────────────────────────────────\n' +
+'        log.info(f\"Looking for date: {date_label}\")\n' +
 '        booked = False\n' +
 '        try:\n' +
-'            # The page uses React divs not tables.\n' +
-'            # Each event is a div.full containing div.event-date and a.eventStatusOpen\n' +
-'            # Find all "full" event blocks and match by date text\n' +
-'            page.wait_for_selector(".full", timeout=10000)\n' +
-'            event_blocks = page.locator(".full").all()\n' +
-'            log.info(f"Found {len(event_blocks)} event blocks on page")\n' +
+'            page.wait_for_selector(\".full\", timeout=10000)\n' +
+'            event_blocks = page.locator(\".full\").all()\n' +
+'            log.info(f\"Found {len(event_blocks)} event blocks on page\")\n' +
 '            found = False\n' +
 '            for block in event_blocks:\n' +
 '                try:\n' +
 '                    block_text = block.inner_text(timeout=500)\n' +
 '                    if date_label not in block_text:\n' +
 '                        continue\n' +
-'                    log.info(f"Found block containing {date_label}")\n' +
-'                    # Find the OPEN link in this block\n' +
-'                    open_link = block.locator("a.eventStatusOpen").first\n' +
+'                    log.info(f\"Found block containing {date_label}\")\n' +
+'                    open_link = block.locator(\"a.eventStatusOpen\").first\n' +
 '                    if open_link.count() == 0:\n' +
-'                        log.warning(f"Date found but status is not OPEN (may be LOCKED or VIEW ONLY)")\n' +
-'                        page.screenshot(path="not_open.png")\n' +
+'                        log.warning(\"Date found but not OPEN (may be LOCKED or VIEW ONLY)\")\n' +
+'                        page.screenshot(path=\"not_open.png\")\n' +
 '                        browser.close(); sys.exit(1)\n' +
-'                    href = open_link.get_attribute("href")\n' +
-'                    log.info(f"Navigating to: {href}")\n' +
-'                    page.goto(f"https://www.thelakesgolfclub.com.au{href}", wait_until="networkidle")\n' +
+'                    href = open_link.get_attribute(\"href\")\n' +
+'                    log.info(f\"Navigating to: {href}\")\n' +
+'                    page.goto(f\"https://www.thelakesgolfclub.com.au{href}\", wait_until=\"networkidle\")\n' +
 '                    page.wait_for_timeout(3000)\n' +
 '                    found = True\n' +
 '                    break\n' +
 '                except Exception as e:\n' +
-'                    log.debug(f"Block error: {e}")\n' +
+'                    log.debug(f\"Block error: {e}\")\n' +
 '                    continue\n' +
 '            if not found:\n' +
-'                log.warning(f"Date {date_label} not found on page")\n' +
-'                page.screenshot(path="date_not_found.png")\n' +
-'                browser.close(); sys.exit(1)\n\n' +
-'            # ── SCAN TEE SHEET: each tee time is a div.row-time ────\n' +
-'            # Time + tee are in the row text; bookable slots have data-rowid cells\n' +
-'            page.wait_for_selector("div.row-time", timeout=10000)\n' +
-'            page.wait_for_timeout(2000)\n\n' +
-'            btn_label  = "Book Group" if CONFIG["book_mode"] == "group" else "Book Me"\n' +
-'            tee_filter = CONFIG["tee"]\n' +
-'            book_mode  = CONFIG["book_mode"]  # group, join, or new\n\n' +
-'            tee_rows = page.locator("div.row-time").all()\n' +
-'            log.info(f"Found {len(tee_rows)} tee time rows")\n\n' +
+'                log.warning(f\"Date {date_label} not found on page\")\n' +
+'                page.screenshot(path=\"date_not_found.png\")\n' +
+'                browser.close(); sys.exit(1)\n' +
+'\n' +
+'            # ── SCAN TEE SHEET ──────────────────────────────────\n' +
+'            page.wait_for_selector(\"div.row-time\", timeout=10000)\n' +
+'            page.wait_for_timeout(2000)\n' +
+'            tee_rows = page.locator(\"div.row-time\").all()\n' +
+'            log.info(f\"Found {len(tee_rows)} tee time rows\")\n' +
+'\n' +
 '            for tee_row in tee_rows:\n' +
 '                try:\n' +
-'                    row_text = tee_row.inner_text(timeout=500)\n\n' +
-'                    # Tee filter\n' +
-'                    if tee_filter == "1ST TEE" and "1st Tee" not in row_text:\n' +
+'                    row_text = tee_row.inner_text(timeout=500)\n' +
+'\n' +
+'                    if tee_filter == \"1ST TEE\" and \"1st Tee\" not in row_text:\n' +
 '                        continue\n' +
-'                    if tee_filter == "10TH TEE" and "10th Tee" not in row_text:\n' +
-'                        continue\n\n' +
-'                    # Extract time e.g. "3:32 pm"\n' +
-'                    times = re.findall(r"\\b(\\d{1,2}:\\d{2})\\s*(am|pm)\\b", row_text, re.IGNORECASE)\n' +
+'                    if tee_filter == \"10TH TEE\" and \"10th Tee\" not in row_text:\n' +
+'                        continue\n' +
+'\n' +
+'                    times = re.findall(r\'\\b(\\d{1,2}:\\d{2})\\s*(am|pm)\\b\', row_text, re.IGNORECASE)\n' +
 '                    if not times:\n' +
 '                        continue\n' +
-'                    raw_time = times[0][0] + " " + times[0][1].upper()\n' +
+'                    raw_time = times[0][0] + \" \" + times[0][1].upper()\n' +
 '                    try:\n' +
-'                        t24 = datetime.strptime(raw_time, "%I:%M %p").strftime("%H:%M")\n' +
-'                    except:\n' +
-'                        t24 = times[0][0].zfill(5)\n\n' +
+'                        t24 = datetime.strptime(raw_time, \"%I:%M %p\").strftime(\"%H:%M\")\n' +
+'                    except Exception:\n' +
+'                        t24 = times[0][0].zfill(5)\n' +
+'\n' +
 '                    if not time_in_window(t24):\n' +
-'                        continue\n\n' +
-'                    # Check bookable cells exist\n' +
-'                    cells    = tee_row.locator("[data-rowid]").all()\n' +
-'                    if not cells:\n' +
-'                        continue\n\n' +
-'                    bme_btns  = tee_row.locator("span.btn-label").all()\n' +
-'                    bme_count = len(bme_btns)\n' +
-'                    has_players = len(cells) > bme_count\n\n' +
-'                    log.info(f"  {raw_time} ({tee_filter}): {bme_count}/{len(cells)} spots free")\n\n' +
-'                    # Mode filter\n' +
-'                    if book_mode == "join" and not has_players:\n' +
-'                        log.debug("  Skipping — no existing players (mode=join)")\n' +
 '                        continue\n' +
-'                    if book_mode == "new" and has_players:\n' +
-'                        log.debug("  Skipping — row has players (mode=new)")\n' +
-'                        continue\n\n' +
-'                    # Select button\n' +
-'                    if book_mode == "group":\n' +
-'                        btn = tee_row.locator("#btn-book-group").first\n' +
+'\n' +
+'                    cells = tee_row.locator(\"[data-rowid]\").all()\n' +
+'                    if not cells:\n' +
+'                        continue\n' +
+'\n' +
+'                    has_players  = row_has_players(tee_row)\n' +
+'                    free_spots   = tee_row.locator(\"span.btn-label\").count()\n' +
+'                    log.info(f\"  {raw_time} ({tee_filter}): has_players={has_players}, free_spots={free_spots}\")\n' +
+'\n' +
+'                    if book_mode == \"new\" and has_players:\n' +
+'                        log.info(f\"  Skipping {raw_time} — row has existing players (mode=new)\")\n' +
+'                        continue\n' +
+'                    if book_mode == \"join\" and not has_players:\n' +
+'                        log.info(f\"  Skipping {raw_time} — no existing players (mode=join)\")\n' +
+'                        continue\n' +
+'\n' +
+'                    if book_mode == \"group\":\n' +
+'                        btn = tee_row.locator(\"button.btn-book-group:not(.hide)\").first\n' +
 '                    else:\n' +
-'                        btn = tee_row.locator("span.btn-label").filter(has_text="Book Me").first\n\n' +
-'                    if btn.count() == 0 or not btn.is_visible(timeout=1000):\n' +
-'                        log.debug("  Button not visible")\n' +
-'                        continue\n\n' +
-'                    log.info(f"  Clicking \'{btn_label}\' at {raw_time}...")\n' +
+'                        btn = tee_row.locator(\"button.btn-book-me:not(.hide)\").first\n' +
+'\n' +
+'                    if btn.count() == 0:\n' +
+'                        log.debug(\"  Button not available, skipping\")\n' +
+'                        continue\n' +
+'\n' +
+'                    log.info(f\"  Clicking \'{btn_label}\' at {raw_time}...\")\n' +
 '                    btn.click()\n' +
-'                    page.wait_for_load_state("networkidle")\n' +
-'                    page.wait_for_timeout(2000)\n\n' +
-'                    # Confirmation dialog\n' +
-'                    for cs in ["button:has-text(\'Confirm\')", "button:has-text(\'OK\')", "button:has-text(\'Yes\')", "button:has-text(\'Submit\')"]:\n' +
+'                    page.wait_for_load_state(\"networkidle\")\n' +
+'                    page.wait_for_timeout(2000)\n' +
+'\n' +
+'                    for cs in [\'button:has-text(\"Confirm\")\', \'button:has-text(\"OK\")\', \'button:has-text(\"Yes\")\', \'button:has-text(\"Submit\")\']:\n' +
 '                        try:\n' +
 '                            cb = page.locator(cs).first\n' +
 '                            if cb.is_visible(timeout=2000):\n' +
-'                                cb.click(); page.wait_for_load_state("networkidle")\n' +
-'                                log.info("  Confirmation clicked"); break\n' +
-'                        except: continue\n\n' +
+'                                cb.click(); page.wait_for_load_state(\"networkidle\")\n' +
+'                                log.info(\"  Confirmation clicked\"); break\n' +
+'                        except Exception: continue\n' +
+'\n' +
 '                    booked = True\n' +
-'                    log.info(f"  ✅ Booked \'{btn_label}\' at {raw_time}!")\n' +
-'                    break\n\n' +
+'                    log.info(f\"  ✅ Booked \'{btn_label}\' at {raw_time}!\")\n' +
+'                    break\n' +
+'\n' +
 '                except Exception as e:\n' +
-'                    log.debug(f"  Row error: {e}")\n' +
-'                    continue\n\n' +
+'                    log.debug(f\"  Row error: {e}\")\n' +
+'                    continue\n' +
+'\n' +
 '        except Exception as e:\n' +
-'            log.warning(f"Booking error: {e}")\n\n' +
-'        ts = datetime.now().strftime("%Y%m%d_%H%M%S")\n' +
-'        fn = f"booking_{\'success\' if booked else \'failed\'}_{ts}.png"\n' +
+'            log.warning(f\"Booking error: {e}\")\n' +
+'\n' +
+'        ts = datetime.now().strftime(\"%Y%m%d_%H%M%S\")\n' +
+'        fn = f\"booking_{\'success\' if booked else \'failed\'}_{ts}.png\"\n' +
 '        page.screenshot(path=fn, full_page=True)\n' +
-'        log.info(f"Screenshot saved: {fn}")\n' +
-'        browser.close()\n\n' +
+'        log.info(f\"Screenshot saved: {fn}\")\n' +
+'        browser.close()\n' +
+'\n' +
 '    if booked:\n' +
-'        log.info("✅ Tee time booked successfully!")\n' +
+'        log.info(\"✅ Tee time booked successfully!\")\n' +
 '    else:\n' +
-'        log.warning("❌ No booking made — check screenshot for details.")\n\n' +
-'if __name__ == "__main__":\n' +
+'        log.warning(\"❌ No booking made — check screenshot for details.\")\n' +
+'\n' +
+'if __name__ == \"__main__\":\n' +
 '    run()\n';
 
   document.getElementById('scriptOutput').textContent = script;
