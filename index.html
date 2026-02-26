@@ -111,6 +111,12 @@
   .sched-countdown.past { color:var(--text-muted); }
   .sched-delete { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:4px 6px; border-radius:2px; transition:all .2s; line-height:1; }
   .sched-delete:hover { background:rgba(192,57,43,.1); color:#c0392b; }
+  /* TIME PICKER */
+  .time-picker-wrap { display:flex; align-items:stretch; gap:0; background:var(--cream); border:1px solid var(--cream-dark); border-radius:1px; overflow:hidden; width:fit-content; height:47px; }
+  .time-picker-wrap select { background:transparent; border:none; border-radius:0; padding:0 14px; font-family:'Cormorant Garamond',serif; font-size:20px; color:var(--green); font-weight:400; width:64px; text-align:center; cursor:pointer; box-shadow:none; background-image:none; height:100%; }
+  .time-picker-wrap select:focus { outline:none; background:rgba(61,107,61,.06); }
+  .time-picker-wrap select:first-child { border-right:1px solid var(--cream-dark); }
+  .time-picker-colon { font-family:'Cormorant Garamond',serif; font-size:24px; color:var(--gold); padding:0 4px; display:flex; align-items:center; user-select:none; }
   .sched-run-info { display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px 12px; background:var(--cream); border-radius:1px; border:1px solid var(--cream-dark); flex-wrap:wrap; }
   .sched-run-info.today { background:rgba(201,168,76,.08); border-color:rgba(201,168,76,.3); }
   .sched-run-info.past  { opacity:.6; }
@@ -269,7 +275,22 @@
         </div>
         <div class="field" style="margin:0">
           <label>What time do bookings open? (local time)</label>
-          <input type="time" id="openTime" value="07:00" />
+          <div class="time-picker-wrap">
+            <select id="openHour">
+              <option value="05">05</option><option value="06">06</option><option value="07" selected>07</option>
+              <option value="08">08</option><option value="09">09</option><option value="10">10</option>
+              <option value="11">11</option><option value="12">12</option><option value="13">13</option>
+              <option value="14">14</option><option value="15">15</option><option value="16">16</option>
+            </select>
+            <span class="time-picker-colon">:</span>
+            <select id="openMinute">
+              <option value="00" selected>00</option><option value="05">05</option><option value="10">10</option>
+              <option value="15">15</option><option value="20">20</option><option value="25">25</option>
+              <option value="30">30</option><option value="35">35</option><option value="40">40</option>
+              <option value="45">45</option><option value="50">50</option><option value="55">55</option>
+            </select>
+          </div>
+          <input type="hidden" id="openTime" value="07:00" />
         </div>
       </div>
       <p class="date-hint" id="scheduleHint" style="margin-top:8px;">Script will run 1 minute before bookings open</p>
@@ -642,8 +663,15 @@ function updateScheduleHint() {
   document.getElementById('scheduleHint').innerHTML =
     'Script runs at <span style="color:var(--green-light)">' + runTimeFmt + '</span> on <span style="color:var(--green-light)">' + niceRun + '</span> — 1 min before bookings open at ' + openTime + ', ' + days + ' days before your round on <span style="color:var(--green-light)">' + nicePlay + '</span>';
 }
+function syncOpenTime() {
+  const h = document.getElementById('openHour').value;
+  const m = document.getElementById('openMinute').value;
+  document.getElementById('openTime').value = h + ':' + m;
+  updateScheduleHint();
+}
+document.getElementById('openHour').addEventListener('change', syncOpenTime);
+document.getElementById('openMinute').addEventListener('change', syncOpenTime);
 document.getElementById('daysAdvance').addEventListener('change', updateScheduleHint);
-document.getElementById('openTime').addEventListener('change', updateScheduleHint);
 dp.addEventListener('change', updateScheduleHint);
 updateScheduleHint();
 
