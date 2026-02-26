@@ -439,13 +439,19 @@ function generate() {
 '    with sync_playwright() as p:\n' +
 '        browser = p.chromium.launch(headless=CONFIG[\"headless\"])\n' +
 '        page    = browser.new_context().new_page()\n' +
-'\n' +
 '        # ── LOGIN ───────────────────────────────────────────\n' +
 '        log.info(\"Logging in...\")\n' +
 '        page.goto(CONFIG[\"login_url\"], wait_until=\"networkidle\")\n' +
-'        for sel in [\'input[name=\"memberLogin\"]\', \'input[name=\"username\"]\', \'input[type=\"text\"]:visible\']:\n' +
+'        page.wait_for_timeout(2000)\n' +
+'        log.info(f\"Login page URL: {page.url}\")\n' +
+'        filled_user = False\n' +
+'        for sel in [\'input[name=\"memberLogin\"]\', \'input[name=\"username\"]\', \'input[name=\"MembershipNo\"]\', \'input[type=\"text\"]:visible\']:\n' +
 '            if page.locator(sel).count() > 0:\n' +
-'                page.fill(sel, CONFIG[\"username\"]); break\n' +
+'                page.fill(sel, CONFIG[\"username\"])\n' +
+'                log.info(f\"Filled username into: {sel}\")\n' +
+'                filled_user = True; break\n' +
+'        if not filled_user:\n' +
+'            log.error(\"Could not find username field\"); page.screenshot(path=\"login_failed.png\"); browser.close(); sys.exit(1)\n' +
 '        for sel in [\'input[name=\"memberPassword\"]\', \'input[name=\"password\"]\', \'input[type=\"password\"]\']:\n' +
 '            if page.locator(sel).count() > 0:\n' +
 '                page.fill(sel, CONFIG[\"password\"]); break\n' +
@@ -453,19 +459,25 @@ function generate() {
 '            if page.locator(sel).count() > 0:\n' +
 '                page.click(sel); break\n' +
 '        page.wait_for_load_state(\"networkidle\")\n' +
-'        if any(x in page.inner_text(\"body\").lower() for x in [\"invalid password\", \"login failed\"]):\n' +
-'            log.error(\"Login failed.\"); page.screenshot(path=\"login_failed.png\"); browser.close(); sys.exit(1)\n' +
+'        page.wait_for_timeout(2000)\n' +
+'        log.info(f\"Post-login URL: {page.url}\")\n' +
+'        log.info(f\"Post-login title: {page.title()}\")\n' +
+'        if \"login\" in page.url.lower() or \"login\" in page.title().lower():\n' +
+'            log.error(\"Login failed — still on login page. Check GOLF_USERNAME / GOLF_PASSWORD secrets.\")\n' +
+'            page.screenshot(path=\"login_failed.png\"); browser.close(); sys.exit(1)\n' +
 '        log.info(\"Logged in successfully.\")\n' +
 '\n' +
 '        # ── NAVIGATE TO BOOKING PAGE ─────────────────────────\n' +
 '        page.goto(CONFIG[\"booking_url\"], wait_until=\"networkidle\")\n' +
-'        page.wait_for_timeout(4000)\n' +
+'        page.wait_for_timeout(6000)  # extra wait for calendar to render\n' +
 '\n' +
 '        # ── FIND TARGET DATE ────────────────────────────────\n' +
 '        log.info(f\"Looking for date: {date_label}\")\n' +
+'        log.info(f\"Page title: {page.title()}\")\n' +
+'        log.info(f\"Page URL: {page.url}\")\n' +
 '        booked = False\n' +
 '        try:\n' +
-'            page.wait_for_selector(\".full\", timeout=10000)\n' +
+'            page.wait_for_selector(\".full\", timeout=20000)\n' +
 '            event_blocks = page.locator(\".full\").all()\n' +
 '            log.info(f\"Found {len(event_blocks)} event blocks on page\")\n' +
 '            found = False\n' +
