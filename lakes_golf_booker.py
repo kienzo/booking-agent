@@ -1,6 +1,6 @@
 """
 The Lakes Golf Club - Automated Tee Time Booker
-Generated: 27/02/2026 | Mode: Book Me
+Generated: 27/02/2026 | Mode: Book Group
 ================================================
 Runs via GitHub Actions automatically
 """
@@ -16,10 +16,10 @@ CONFIG = {
     "username":      os.getenv("GOLF_USERNAME"),  # Set GOLF_USERNAME in GitHub Secrets
     "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets
     "booking_date":  "2026-03-06",   # Friday 6 March 2026
-    "book_mode":     "new",  # Clicks "BOOK ME" on a fully empty row (no one else booked yet)
+    "book_mode":     "group",  # Clicks "BOOK GROUP" — books the whole tee time
     "tee":           "ANY",       # Only book slots starting from this tee
-    "earliest_time": "14:00",
-    "latest_time":   "14:30",
+    "earliest_time": "13:30",
+    "latest_time":   "14:00",
     "headless":      True,               # Must be True on GitHub Actions (no display)
     "login_url":     "https://www.thelakesgolfclub.com.au/security/login.msp",
     "booking_url":   "https://www.thelakesgolfclub.com.au/members/bookings/index.xsp?booking_resource_id=3000000",
