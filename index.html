@@ -117,6 +117,17 @@
   .sched-countdown.past { color:var(--text-muted); }
   .sched-delete { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:4px 6px; border-radius:2px; transition:all .2s; line-height:1; }
   .sched-delete:hover { background:rgba(192,57,43,.1); color:#c0392b; }
+
+  /* SECRETS BANNER */
+  .secrets-banner { display:flex; flex-direction:column; gap:16px; }
+  .secrets-icon { font-size:32px; }
+  .secrets-text { font-size:12px; line-height:1.8; color:var(--text-muted); }
+  .secrets-text strong { color:var(--text); font-size:13px; }
+  .secrets-text p { margin-top:4px; }
+  .secrets-fields { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+  .secrets-field { display:flex; align-items:center; gap:12px; background:var(--cream); border:1px solid var(--cream-dark); padding:10px 16px; border-radius:1px; }
+  .secrets-key { font-family:'DM Mono',monospace; font-size:11px; color:var(--green); background:rgba(61,107,61,.1); padding:2px 8px; border-radius:2px; white-space:nowrap; }
+  .secrets-val { font-size:11px; color:var(--text-muted); letter-spacing:.3px; }
 </style>
 </head>
 <body>
@@ -135,17 +146,6 @@
       <div class="os-options">
         <div class="os-chip"><input type="radio" name="os" id="os-windows" value="windows" checked /><label for="os-windows"><span class="os-icon">🪟</span>Windows</label></div>
         <div class="os-chip"><input type="radio" name="os" id="os-mac" value="mac" /><label for="os-mac"><span class="os-icon">🍎</span>Mac</label></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- CREDENTIALS -->
-  <div class="section">
-    <div class="section-header"><span class="section-num">01</span><span class="section-title">Member Credentials</span></div>
-    <div class="section-body">
-      <div class="field-row">
-        <div class="field"><label>Member Number</label><input type="text" id="username" placeholder="e.g. 3722 (no leading zeros)" /></div>
-        <div class="field"><label>Password</label><input type="password" id="password" placeholder="Your member portal password" /></div>
       </div>
     </div>
   </div>
@@ -348,8 +348,6 @@ function updateHint() {
 }
 
 function generate() {
-  const username  = document.getElementById('username').value.trim();
-  const password  = document.getElementById('password').value.trim();
   const earliest  = document.getElementById('earliest').value;
   const latest    = document.getElementById('latest').value;
   const os        = document.querySelector('input[name="os"]:checked').value;
@@ -357,8 +355,6 @@ function generate() {
   const tee       = document.querySelector('input[name="tee"]:checked').value;
   const dateVal   = document.getElementById('bookingDate').value;
 
-  if (!username) { alert('Please enter your member number.'); return; }
-  if (!password) { alert('Please enter your password.'); return; }
   if (!dateVal)  { alert('Please select a booking date.'); return; }
 
   const d        = new Date(dateVal + 'T00:00:00');
@@ -396,8 +392,8 @@ sched + '\n' +
 'from playwright.sync_api import sync_playwright\n\n' +
 'load_dotenv()\n\n' +
 'CONFIG = {\n' +
-'    "username":      os.getenv("GOLF_USERNAME", "' + username + '"),\n' +
-'    "password":      os.getenv("GOLF_PASSWORD", "' + password + '"),\n' +
+'    "username":      os.getenv("GOLF_USERNAME"),  # Set GOLF_USERNAME in GitHub Secrets\n' +
+'    "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets\n' +
 '    "booking_date":  "' + dateVal + '",   # ' + dayName + ' ' + dateNice + '\n' +
 '    "book_mode":     "' + booktype + '",  ' + bookBtnComment + '\n' +
 '    "tee":           "' + tee + '",       # Only book slots starting from this tee\n' +
@@ -817,11 +813,7 @@ async function generateAndPush() {
   const token = await getToken();
   if (!token) { alert('Enter your PIN in Section 05 to unlock GitHub access.'); return; }
 
-  const username  = document.getElementById('username').value.trim();
-  const password  = document.getElementById('password').value.trim();
   const dateVal   = document.getElementById('bookingDate').value;
-  if (!username) { alert('Please enter your member number.'); return; }
-  if (!password) { alert('Please enter your password.'); return; }
   if (!dateVal)  { alert('Please select a booking date.'); return; }
 
   // Generate the script first
