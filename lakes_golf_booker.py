@@ -17,7 +17,7 @@ CONFIG = {
     "password":      os.getenv("GOLF_PASSWORD"),  # Set GOLF_PASSWORD in GitHub Secrets
     "booking_date":  "2026-03-06",   # Friday 6 March 2026
     "book_mode":     "group",  # Clicks "BOOK GROUP" — books the whole tee time
-    "tee":           "ANY",       # Only book slots starting from this tee
+    "tee":           "1ST TEE",       # Only book slots starting from this tee
     "earliest_time": "13:30",
     "latest_time":   "14:00",
     "headless":      False,              # Change to True to run silently
