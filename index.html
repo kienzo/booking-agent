@@ -702,6 +702,8 @@ async function ghAPI(token, method, path, body) {
     headers: { Authorization: 'token ' + token, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github.v3+json' },
     body: body ? JSON.stringify(body) : undefined
   });
+  // 204 No Content (e.g. workflow_dispatch) returns empty body — don't parse as JSON
+  if (r.status === 204) return {};
   const data = await r.json();
   if (!r.ok) throw new Error(data.message || r.statusText);
   return data;
