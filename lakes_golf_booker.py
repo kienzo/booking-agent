@@ -46,6 +46,7 @@ def run():
     book_mode   = CONFIG["book_mode"]
     tee_filter  = CONFIG["tee"]
     btn_label   = "Book Group" if book_mode == "group" else "Book Me"
+    # strftime "%-d" removes leading zero on Linux; "%#d" on Windows
     import platform
     fmt = "%#d %b" if platform.system() == "Windows" else "%-d %b"
     date_label = target_date.strftime(fmt)
@@ -58,121 +59,32 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=CONFIG["headless"])
         page    = browser.new_context().new_page()
-
         # ── LOGIN ───────────────────────────────────────────
         log.info("Logging in...")
         page.goto(CONFIG["login_url"], wait_until="networkidle")
         page.wait_for_timeout(2000)
         log.info(f"Login page URL: {page.url}")
-
-        # ── DEBUG: log every input field on the login page ──
-        log.info("── Scanning login page input fields ──")
-        all_inputs = page.locator("input").all()
-        log.info(f"Found {len(all_inputs)} input elements on login page")
-        for i, inp in enumerate(all_inputs):
-            try:
-                itype = inp.get_attribute("type") or "?"
-                iname = inp.get_attribute("name") or "?"
-                iid   = inp.get_attribute("id")   or "?"
-                iph   = inp.get_attribute("placeholder") or "?"
-                log.info(f"  Input[{i}]: type={itype}  name={iname}  id={iid}  placeholder={iph}")
-            except Exception as e:
-                log.info(f"  Input[{i}]: error reading attrs — {e}")
-        log.info("── End of input field scan ──")
-
-        # ── FILL USERNAME ────────────────────────────────────
         filled_user = False
-        for sel in [
-            'input[name="memberLogin"]',
-            'input[name="username"]',
-            'input[name="MembershipNo"]',
-            'input[name="member_login"]',
-            'input[name="login"]',
-            'input[id="memberLogin"]',
-            'input[id="username"]',
-            'input[id="MembershipNo"]',
-            'input[type="text"]:visible',
-        ]:
-            try:
-                loc = page.locator(sel)
-                if loc.count() > 0:
-                    page.fill(sel, CONFIG["username"])
-                    log.info(f"Filled username into: {sel}")
-                    filled_user = True
-                    break
-            except Exception:
-                continue
-
+        for sel in ['input[name="memberLogin"]', 'input[name="username"]', 'input[name="MembershipNo"]', 'input[type="text"]:visible']:
+            if page.locator(sel).count() > 0:
+                page.fill(sel, CONFIG["username"])
+                log.info(f"Filled username into: {sel}")
+                filled_user = True; break
         if not filled_user:
-            log.error("Could not find username field")
-            page.screenshot(path="login_failed.png")
-            browser.close()
-            sys.exit(1)
-
-        # ── FILL PASSWORD ────────────────────────────────────
-        filled_pass = False
-        for sel in [
-            'input[name="memberPassword"]',
-            'input[name="password"]',
-            'input[name="member_password"]',
-            'input[id="memberPassword"]',
-            'input[id="password"]',
-            'input[type="password"]',
-        ]:
-            try:
-                loc = page.locator(sel)
-                if loc.count() > 0:
-                    page.fill(sel, CONFIG["password"])
-                    log.info(f"Filled password into: {sel}")
-                    filled_pass = True
-                    break
-            except Exception:
-                continue
-
-        if not filled_pass:
-            log.error("Could not find password field")
-            page.screenshot(path="login_failed.png")
-            browser.close()
-            sys.exit(1)
-
-        # ── CLICK SUBMIT ─────────────────────────────────────
-        clicked = False
-        for sel in [
-            'input[type="submit"]',
-            'button[type="submit"]',
-            'button:has-text("Login")',
-            'button:has-text("Log in")',
-            'button:has-text("Sign in")',
-            'input[value="Login"]',
-            'input[value="Log In"]',
-        ]:
-            try:
-                loc = page.locator(sel)
-                if loc.count() > 0:
-                    page.click(sel)
-                    log.info(f"Clicked submit: {sel}")
-                    clicked = True
-                    break
-            except Exception:
-                continue
-
-        if not clicked:
-            log.error("Could not find login submit button")
-            page.screenshot(path="login_failed.png")
-            browser.close()
-            sys.exit(1)
-
+            log.error("Could not find username field"); page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
+        for sel in ['input[name="memberPassword"]', 'input[name="password"]', 'input[type="password"]']:
+            if page.locator(sel).count() > 0:
+                page.fill(sel, CONFIG["password"]); break
+        for sel in ['input[type="submit"]', 'button[type="submit"]', 'button:has-text("Login")']:
+            if page.locator(sel).count() > 0:
+                page.click(sel); break
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(2000)
         log.info(f"Post-login URL: {page.url}")
         log.info(f"Post-login title: {page.title()}")
-
         if "login" in page.url.lower() or "login" in page.title().lower():
             log.error("Login failed — still on login page. Check GOLF_USERNAME / GOLF_PASSWORD secrets.")
-            page.screenshot(path="login_failed.png")
-            browser.close()
-            sys.exit(1)
-
+            page.screenshot(path="login_failed.png"); browser.close(); sys.exit(1)
         log.info("Logged in successfully.")
 
         # ── NAVIGATE TO BOOKING PAGE ─────────────────────────
