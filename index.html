@@ -735,16 +735,35 @@ async function ghAPI(token, method, path, body) {
   return data;
 }
 
+// ── FIXED: Retry on SHA mismatch to handle race conditions ───────────────
+// When multiple files are pushed in quick succession, GitHub can return a
+// stale cached SHA. We re-fetch the latest SHA and retry up to 3 times.
 async function upsertFile(token, repo, filePath, content, message) {
-  // Get current SHA if file exists
-  let sha;
-  try {
-    const existing = await ghAPI(token, 'GET', '/repos/' + repo + '/contents/' + filePath);
-    sha = existing.sha;
-  } catch(e) { sha = null; }
-  const body = { message, content: btoa(unescape(encodeURIComponent(content))) };
-  if (sha) body.sha = sha;
-  return ghAPI(token, 'PUT', '/repos/' + repo + '/contents/' + filePath, body);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Always re-fetch the current SHA fresh on each attempt
+    let sha;
+    try {
+      const existing = await ghAPI(token, 'GET', '/repos/' + repo + '/contents/' + filePath);
+      sha = existing.sha;
+    } catch(e) { sha = null; }
+
+    const body = { message, content: btoa(unescape(encodeURIComponent(content))) };
+    if (sha) body.sha = sha;
+
+    try {
+      return await ghAPI(token, 'PUT', '/repos/' + repo + '/contents/' + filePath, body);
+    } catch(e) {
+      // On SHA mismatch, wait briefly then retry with a fresh SHA
+      const isShaError = e.message.includes('does not match') ||
+                         e.message.includes('conflict') ||
+                         e.message.includes('409');
+      if (attempt < 2 && isShaError) {
+        await new Promise(r => setTimeout(r, 700 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
 }
 
 function copyScript() {
